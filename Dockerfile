@@ -31,8 +31,19 @@ RUN apk add --no-cache \
 # Install composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
+# Bake in standard Laravel configs
+COPY config/nginx.conf /etc/nginx/http.d/default.conf
+COPY config/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY config/php.ini /usr/local/etc/php/conf.d/custom.ini
+COPY config/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 # Default working directory for Laravel apps
 WORKDIR /var/www/html
+
+EXPOSE 80
+
+ENTRYPOINT ["/entrypoint.sh"]
 
 # Labels for image metadata
 LABEL org.opencontainers.image.source="https://github.com/nakatomitrading/docker-php-base"
