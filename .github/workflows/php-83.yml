@@ -1,10 +1,11 @@
-name: Build and Push Docker Image
+name: Build php-83
 
 on:
   push:
     branches: [main]
+    paths:
+      - 'php-83/**'
   schedule:
-    # Check weekly on Sunday at 2am UTC
     - cron: '0 2 * * 0'
   workflow_dispatch:
     inputs:
@@ -16,11 +17,11 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: nakatomitrading/docker/laravel-83
+  IMAGE_NAME: lornequinn/docker/php-83
   BASE_IMAGE: php:8.3-fpm-alpine
 
 jobs:
-  check-and-build:
+  build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -30,27 +31,21 @@ jobs:
       - name: Check base image digest
         id: check-digest
         run: |
-          # Get current base image digest
           BASE_DIGEST=$(docker manifest inspect ${{ env.BASE_IMAGE }} -v 2>/dev/null | jq -r '.Descriptor.digest // .[0].Descriptor.digest' || echo "unknown")
           echo "base_digest=$BASE_DIGEST" >> $GITHUB_OUTPUT
 
-          # Get our image's base digest label (if exists)
           OUR_DIGEST=$(docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest -v 2>/dev/null | jq -r '.[0].OCIManifest.config.Labels["base.image.digest"] // "none"' || echo "none")
           echo "our_digest=$OUR_DIGEST" >> $GITHUB_OUTPUT
 
-          # Determine if rebuild needed
           if [ "${{ github.event.inputs.force_rebuild }}" = "true" ]; then
             echo "needs_build=true" >> $GITHUB_OUTPUT
-            echo "Forced rebuild requested"
           elif [ "$BASE_DIGEST" != "$OUR_DIGEST" ]; then
             echo "needs_build=true" >> $GITHUB_OUTPUT
-            echo "Base image changed: $OUR_DIGEST -> $BASE_DIGEST"
           else
             echo "needs_build=false" >> $GITHUB_OUTPUT
-            echo "Base image unchanged, skipping build"
           fi
 
-      - name: Checkout repository
+      - name: Checkout
         if: steps.check-digest.outputs.needs_build == 'true' || github.event_name == 'push'
         uses: actions/checkout@v4
 
@@ -58,7 +53,7 @@ jobs:
         if: steps.check-digest.outputs.needs_build == 'true' || github.event_name == 'push'
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Container Registry
+      - name: Log in to GHCR
         if: steps.check-digest.outputs.needs_build == 'true' || github.event_name == 'push'
         uses: docker/login-action@v3
         with:
@@ -66,46 +61,28 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Generate version tags
+      - name: Generate tags
         if: steps.check-digest.outputs.needs_build == 'true' || github.event_name == 'push'
         id: versions
         run: |
           echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
-          # Get actual PHP version from base image
           PHP_VERSION=$(docker run --rm ${{ env.BASE_IMAGE }} php -r 'echo PHP_VERSION;')
           echo "php_version=$PHP_VERSION" >> $GITHUB_OUTPUT
-          echo "PHP version: $PHP_VERSION"
-
-      - name: Extract metadata
-        if: steps.check-digest.outputs.needs_build == 'true' || github.event_name == 'push'
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=latest
-            type=raw,value=${{ steps.versions.outputs.date }}
-            type=raw,value=${{ steps.versions.outputs.php_version }}-${{ steps.versions.outputs.date }}
 
       - name: Build and push
         if: steps.check-digest.outputs.needs_build == 'true' || github.event_name == 'push'
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: ./php-83
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.versions.outputs.date }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.versions.outputs.php_version }}-${{ steps.versions.outputs.date }}
           labels: |
-            ${{ steps.meta.outputs.labels }}
+            org.opencontainers.image.source=https://github.com/lornequinn/docker-php-base
+            org.opencontainers.image.description=PHP 8.3 FPM Alpine with compiled Laravel extensions
+            org.opencontainers.image.licenses=MIT
             base.image.digest=${{ steps.check-digest.outputs.base_digest }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: Summary
-        run: |
-          if [ "${{ steps.check-digest.outputs.needs_build }}" = "true" ] || [ "${{ github.event_name }}" = "push" ]; then
-            echo "### Image built and pushed" >> $GITHUB_STEP_SUMMARY
-            echo "Base image digest: \`${{ steps.check-digest.outputs.base_digest }}\`" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "### Build skipped" >> $GITHUB_STEP_SUMMARY
-            echo "Base image unchanged since last build" >> $GITHUB_STEP_SUMMARY
-          fi
