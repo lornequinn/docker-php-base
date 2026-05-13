@@ -1,14 +1,16 @@
 FROM php:8.3-fpm-alpine
 
 RUN apk add --no-cache \
-    libpng-dev \
-    libjpeg-turbo-dev \
-    freetype-dev \
-    libzip-dev \
-    oniguruma-dev \
-    icu-dev \
-    postgresql-dev \
-    libpq \
+        libpng-dev \
+        libjpeg-turbo-dev \
+        freetype-dev \
+        libzip-dev \
+        oniguruma-dev \
+        icu-dev \
+        postgresql-dev \
+        libpq \
+        libsodium-dev \
+    && apk add --no-cache --virtual .build-deps $PHPIZE_DEPS \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j$(nproc) \
         gd \
@@ -20,7 +22,11 @@ RUN apk add --no-cache \
         bcmath \
         zip \
         intl \
-        opcache
+        opcache \
+        sodium \
+    && pecl install redis \
+    && docker-php-ext-enable redis \
+    && apk del .build-deps
 
 LABEL org.opencontainers.image.source="https://github.com/lornequinn/docker-php-base"
 LABEL org.opencontainers.image.description="PHP 8.3 FPM Alpine with compiled Laravel extensions"
